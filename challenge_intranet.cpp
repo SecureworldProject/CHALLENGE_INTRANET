@@ -81,17 +81,18 @@ int executeChallenge() {
 	ssid = getCurrentWifiSSID();
 	if (ssid==NULL){
 		result = -1;
+		ERRCHPRINT("ERROR in getCurrentWifiSSID()\n");
 		goto CLEANUP;
 	}
 	ssid_len = strlen(ssid);
-	printf("******* ssid = '%s'\n", ssid);
-	printf("******* ssid_len = %llu\n", ssid_len);
+	//printf("******* ssid = '%s'\n", ssid);
+	//printf("******* ssid_len = %llu\n", ssid_len);
 
 
 	// Check resposnse to the urls
 	url_num = _msize(urls) / sizeof(char*);
 	urls_results_size = (int)(url_num / 8) + ((url_num % 8 == 0) ? 0 : 1);
-	printf("******* urls_results_size = %llu\n", urls_results_size);
+	//printf("******* urls_results_size = %llu\n", urls_results_size);
 	urls_results_buf = (byte*)calloc(urls_results_size, sizeof(byte));      // Important calloc so it is initialized to 0s
 	if (urls_results_buf == NULL) {
 		result = -1;
@@ -100,10 +101,10 @@ int executeChallenge() {
 	for (size_t i = 0; i < url_num; i++) {
 		if (ping(urls[i])) {
 			setBitTrue(urls_results_buf, i);
-			printf("******* set bit true in pos = %llu\n", i);
+			//printf("******* set bit true in pos = %llu\n", i);
 		}
 	}
-	printf("******* urls_results_buf = 0x%02hhx    or   %d\n", urls_results_buf[0], urls_results_buf[0]);
+	//printf("******* urls_results_buf = 0x%02hhx    or   %d\n", urls_results_buf[0], urls_results_buf[0]);
 
 	// Prepare the key before the critical section, so it is as smmall as possible
 	size_of_key = ssid_len + urls_results_size;
@@ -206,7 +207,8 @@ char* getCurrentWifiSSID() {
 	fp = _popen("netsh wlan show int", "r");
 	if (fp == NULL) {
 		ERRCHPRINT("Failed to get current wifi SSID\n");
-		exit(1);
+		//exit(1);
+		return NULL;
 	}
 
 	// Read oputput line by line
@@ -227,9 +229,19 @@ char* getCurrentWifiSSID() {
 			}
 		}
 	}
+	// Ensure output is not NULL
+	if (NULL == result) {
+		result = (char*)malloc(1 * sizeof(char));
+		if (result != NULL) {
+			result[0] = '\0';
+		}
+	}
 
-	// Close the piped process
-	_pclose(fp);
+	// Close the piped process if needed (should be)
+	if (NULL != fp) {
+		_pclose(fp);
+		fp = NULL;
+	}
 
 	return result;
 }

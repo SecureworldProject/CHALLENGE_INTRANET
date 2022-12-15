@@ -1,0 +1,21 @@
+{
+	"FileName": "CHALLENGE_INTRANET.dll",
+	"Description": "This challenge identifies the SSID of the network and appends a stream of 0s and 1s that represent the accessibility to different urls.",
+	"Props": {
+		"validity_time": 3600,
+		"refresh_time": 3000,
+		"SSID": "MiFibra-74CE",
+		"urls":
+			[
+				"helios.nsn-intra.net",
+				"nokia.sharepoint.com",
+				"wam.inside.nsn.com",
+				"lawson.web.alcatel-lucent.com",
+				"www.google.com",
+				"www.yahoo.com",
+				"www.google.es",
+				"www.youtube.com"
+			]
+	},
+	"Requirements": "none"
+}
