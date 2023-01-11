@@ -19,7 +19,6 @@
 
 
 /////  GLOBAL VARIABLES  /////
-char* target_SSID = NULL;
 char** urls = NULL;
 
 
@@ -27,7 +26,6 @@ char** urls = NULL;
 
 /////  FUNCTION DEFINITIONS  /////
 void getChallengeParameters();
-char* getCurrentWifiSSID();
 BOOL ping(char* url);
 void setBitTrue(byte * buf, int pos);
 
@@ -65,40 +63,26 @@ int init(struct ChallengeEquivalenceGroup* group_param, struct Challenge* challe
 int executeChallenge() {
 	DWORD result = ERROR_SUCCESS;
 
-	char* ssid = NULL;
-	size_t ssid_len = 0;
-	size_t url_num = 0;
+	size_t urls_amount = 0;
 	size_t urls_results_size = 0;
 	byte* urls_results_buf = NULL;
 
 	byte* key_data = NULL;
 	size_t size_of_key = 0;
-	time_t new_validity_time = 0;
+	time_t new_expiration_time = 0;
 	CHPRINT("Execute (%ws)\n", challenge->file_name);
 	if (group == NULL || challenge == NULL)	return -1;
 
-	// Get the SSID
-	ssid = getCurrentWifiSSID();
-	if (ssid==NULL){
-		result = -1;
-		ERRCHPRINT("ERROR in getCurrentWifiSSID()\n");
-		goto CLEANUP;
-	}
-	ssid_len = strlen(ssid);
-	//printf("******* ssid = '%s'\n", ssid);
-	//printf("******* ssid_len = %llu\n", ssid_len);
-
-
 	// Check resposnse to the urls
-	url_num = _msize(urls) / sizeof(char*);
-	urls_results_size = (int)(url_num / 8) + ((url_num % 8 == 0) ? 0 : 1);
+	urls_amount = _msize(urls) / sizeof(char*);
+	urls_results_size = (int)(urls_amount / 8) + ((urls_amount % 8 == 0) ? 0 : 1);
 	//printf("******* urls_results_size = %llu\n", urls_results_size);
 	urls_results_buf = (byte*)calloc(urls_results_size, sizeof(byte));      // Important calloc so it is initialized to 0s
 	if (urls_results_buf == NULL) {
 		result = -1;
-		goto CLEANUP;
+		return -1;
 	}
-	for (size_t i = 0; i < url_num; i++) {
+	for (size_t i = 0; i < urls_amount; i++) {      // Ping each url and set the corresponding bit to 1 if response was successful
 		if (ping(urls[i])) {
 			setBitTrue(urls_results_buf, i);
 			//printf("******* set bit true in pos = %llu\n", i);
@@ -107,15 +91,9 @@ int executeChallenge() {
 	//printf("******* urls_results_buf = 0x%02hhx    or   %d\n", urls_results_buf[0], urls_results_buf[0]);
 
 	// Prepare the key before the critical section, so it is as smmall as possible
-	size_of_key = ssid_len + urls_results_size;
-	key_data = (byte*)malloc(ssid_len + urls_results_size);
-	if (key_data == NULL) {
-		result = -1;
-		goto CLEANUP;
-	}
-	memcpy_s(key_data, size_of_key, ssid, ssid_len);
-	memcpy_s(&(key_data[ssid_len]), size_of_key - ssid_len, urls_results_buf, urls_results_size);
-	new_validity_time = time(NULL) + validity_time;
+	size_of_key = urls_results_size;
+	key_data = urls_results_buf;
+	new_expiration_time = time(NULL) + validity_time;
 
 
 	//CHPRINT(" --- ENTERING CRITICAL SECTION --- \n");
@@ -125,17 +103,10 @@ int executeChallenge() {
 	}
 	group->subkey->data = key_data;
 	group->subkey->size = size_of_key;
-	group->subkey->expires = new_validity_time;
+	group->subkey->expires = new_expiration_time;
 	LeaveCriticalSection(&(group->subkey->critical_section));
 	//CHPRINT(" --- LEAVING CRITICAL SECTION --- \n");
 
-	CLEANUP:
-	if (ssid != NULL) {
-		free(ssid);
-	}
-	if (urls_results_buf != NULL) {
-		free(urls_results_buf);
-	}
 
 	return 0;   // Always 0 means OK.
 }
@@ -164,13 +135,7 @@ void getChallengeParameters() {
 			CHPRINT("     - Value: %d\n", refresh_time);
 		} else {
 			// Challenge specific parameters (none)
-			if (strcmp(prop_i.name, "SSID") == 0) {
-				str_len = prop_i.value->u.string.length;
-				target_SSID = (char*) malloc(sizeof(char) * (str_len + 1));
-				strcpy_s(target_SSID, str_len+1, prop_i.value->u.string.ptr);
-				CHPRINT(" * Property: SSID\n");
-				CHPRINT("     - Value: %s\n", target_SSID);
-			} else if (strcmp(prop_i.name, "urls") == 0) {
+			if (strcmp(prop_i.name, "urls") == 0) {
 				// Be careful when adding servers outside the intranet. Servers of those URLs could be down for any reason which would lead to a change in the challenge subkey
 				// Could be useful if the URLs are of essential services inside the enterprise intranet
 				jv_urls = prop_i.value;
@@ -194,56 +159,6 @@ void getChallengeParameters() {
 			}
 		}
 	}
-}
-
-char* getCurrentWifiSSID() {
-	FILE* fp = NULL;
-	char* tmp_ptr = NULL;
-	char cmd_result_line[1025];
-	char* result = NULL;
-	int res_size = 0;
-
-	// Open a process with the output piped to a read stream
-	fp = _popen("netsh wlan show int", "r");
-	if (fp == NULL) {
-		ERRCHPRINT("Failed to get current wifi SSID\n");
-		//exit(1);
-		return NULL;
-	}
-
-	// Read oputput line by line
-	while (fgets(cmd_result_line, sizeof(cmd_result_line), fp) != NULL) {
-		// In theory the SSID line is like this: "    SSID                   : NAME_OF_THE_NETWORK"
-		if (strstr(cmd_result_line, " SSID ") != NULL) {
-			tmp_ptr = strstr(cmd_result_line, ":");
-			if (tmp_ptr != NULL) {
-				tmp_ptr += 2;                                           // +2 to start after the colon and space
-				CHPRINT("SSID: %s", tmp_ptr);
-				//CHPRINT("%s", cmd_result_line+29);
-				res_size = strlen(tmp_ptr) - 1 + 1;                     // -1 because it ends in '\n' adn +1 for the null char
-				result = (char*)malloc(res_size * sizeof(char));
-				if (result != NULL) {
-					memcpy_s(result, res_size, tmp_ptr, res_size - 1);  // -1 not to copy the ending '\n'
-					result[res_size - 1] = '\0';
-				}
-			}
-		}
-	}
-	// Ensure output is not NULL
-	if (NULL == result) {
-		result = (char*)malloc(1 * sizeof(char));
-		if (result != NULL) {
-			result[0] = '\0';
-		}
-	}
-
-	// Close the piped process if needed (should be)
-	if (NULL != fp) {
-		_pclose(fp);
-		fp = NULL;
-	}
-
-	return result;
 }
 
 BOOL ping(char* url) {
